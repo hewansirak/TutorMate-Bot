@@ -74,59 +74,6 @@ class AcademicAPIClient:
             print(f"Gemini summary error: {e}")
             return self._mock_generate_summary(title, abstract)
     
-    def _mock_paper_search(self, query: str, year: Optional[str] = None, limit: int = 3) -> List[Dict]:
-        """Mock paper search for MVP testing"""
-        mock_papers = [
-            {
-                "id": f"paper_{hashlib.md5(f'{query}_1'.encode()).hexdigest()[:8]}",
-                "title": f"A Comprehensive Study of {query.title()}: Recent Advances",
-                "authors": ["Dr. Jane Smith", "Prof. John Doe", "Dr. Alice Johnson"],
-                "year": int(year) if year else 2023,
-                "abstract": f"This paper presents a comprehensive analysis of {query}. We investigate recent methodologies and present novel approaches that demonstrate significant improvements. Our experimental results show promising outcomes in various benchmarks and real-world applications.",
-                "url": f"https://arxiv.org/abs/2023.{query.replace(' ', '')[:4]}.12345",
-                "search_query": query
-            },
-            {
-                "id": f"paper_{hashlib.md5(f'{query}_2'.encode()).hexdigest()[:8]}",
-                "title": f"Machine Learning Approaches to {query.title()}: A Survey",
-                "authors": ["Dr. Bob Wilson", "Prof. Sarah Chen"],
-                "year": int(year) if year else 2022,
-                "abstract": f"We survey the landscape of machine learning applications in {query}. This comprehensive review covers traditional methods, deep learning approaches, and emerging techniques. We provide insights into current challenges and future directions.",
-                "url": f"https://arxiv.org/abs/2022.{query.replace(' ', '')[:4]}.67890",
-                "search_query": query
-            },
-            {
-                "id": f"paper_{hashlib.md5(f'{query}_3'.encode()).hexdigest()[:8]}",
-                "title": f"Empirical Analysis of {query.title()} in Distributed Systems",
-                "authors": ["Dr. Mike Zhang", "Prof. Lisa Wang", "Dr. Tom Brown"],
-                "year": int(year) if year else 2024,
-                "abstract": f"This work presents an empirical study of {query} implementation in distributed environments. We analyze performance characteristics, scalability issues, and propose optimization strategies. Our results demonstrate improved efficiency across multiple deployment scenarios.",
-                "url": f"https://arxiv.org/abs/2024.{query.replace(' ', '')[:4]}.11111",
-                "search_query": query
-            }
-        ]
-        
-        return mock_papers[:limit]
-    
-    def _mock_generate_summary(self, title: str, abstract: str) -> str:
-        """Mock summary generation"""
-        return f"""
-**Summary of: {title}**
-
-**Key Findings:**
-• This research addresses important challenges in the field
-• The authors propose novel methodologies that show significant improvements
-• Experimental validation demonstrates the effectiveness of the approach
-
-**Methodology:**
-The study employs a combination of theoretical analysis and empirical evaluation to validate the proposed solutions.
-
-**Impact:**
-This work contributes to the field by providing new insights and practical solutions that can be applied in real-world scenarios.
-
-**Significance:**
-The findings have implications for future research and development in this area, potentially leading to improved performance and new applications.
-        """.strip()
     
     def _arxiv_search(self, query: str, year: Optional[str] = None, limit: int = 3) -> List[Dict]:
         """Real arXiv API search"""
@@ -213,17 +160,3 @@ The findings have implications for future research and development in this area,
             print(f"ArXiv search error: {e}")
             return self._mock_paper_search(query, year, limit)
         
-    def get_paper_details(self, paper_id: str) -> Dict:
-        """Get detailed paper information"""
-        # This would fetch full paper details from APIs
-        return {}
-    
-    def search_by_author(self, author_name: str, limit: int = 5) -> List[Dict]:
-        """Search papers by author"""
-        # Extension feature - search by author name
-        return self.search_papers(f"author:{author_name}", limit=limit)
-    
-    def get_related_papers(self, paper_id: str, limit: int = 3) -> List[Dict]:
-        """Find related papers"""
-        # Extension feature - find papers related to given paper
-        return []
