@@ -10,12 +10,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class AcademicTutorAgent:
+class AcademicCustomerServiceAgent:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
-        self.api_client = AcademicAPIClient(db_path=db_manager.db_path)  # Pass db_path here
+        self.api_client = AcademicAPIClient(db_path=db_manager.db_path) 
         
-        # Configure Gemini
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
@@ -33,11 +32,9 @@ class AcademicTutorAgent:
             
             self.conversation_memory[user_id].append({"role": "user", "message": message})
             
-            # Analyze the message to determine what action to take
             action = self._analyze_user_intent(message)
-            
             response_data = await self._handle_user_request(user_id, message, action)
-            
+
             # Store response
             self.conversation_memory[user_id].append({"role": "assistant", "message": response_data["response"]})
             
@@ -59,41 +56,41 @@ class AcademicTutorAgent:
         """Analyze user message to determine intent"""
         message_lower = message.lower()
         
-        print(f"DEBUG: Analyzing message: '{message_lower}'")  # Debug line
+        print(f"DEBUG: Analyzing message: '{message_lower}'")  
         
         # Check for download intent first
         if any(keyword in message_lower for keyword in ["download", "get pdf", "save paper"]):
-            print("DEBUG: Detected download intent")  # Debug line
+            print("DEBUG: Detected download intent")  
             return "download_paper"
         
         # Check for download history
         elif any(keyword in message_lower for keyword in ["my downloads", "downloaded papers", "show downloads"]):
-            print("DEBUG: Detected download history intent")  # Debug line
+            print("DEBUG: Detected download history intent")  
             return "get_downloads"
         
         # Check for paper ID pattern first (paper_xxxxxxxx)
         elif re.search(r'paper_[a-f0-9]{8}', message_lower) and any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]):
-            print("DEBUG: Detected summary intent")  # Debug line
+            print("DEBUG: Detected summary intent")  
             return "generate_summary"
         
         # Check for other summary keywords
         elif any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]) and not any(keyword in message_lower for keyword in ["search", "find"]):
-            print("DEBUG: Detected general summary intent")  # Debug line
+            print("DEBUG: Detected general summary intent")  
             return "generate_summary"
         
         # Check for search intent
         elif any(keyword in message_lower for keyword in ["search", "find", "paper", "research"]) and not re.search(r'paper_[a-f0-9]{8}', message_lower):
-            print("DEBUG: Detected search intent")  # Debug line
+            print("DEBUG: Detected search intent")  
             return "search_papers"
         
         elif any(keyword in message_lower for keyword in ["history", "previous", "past searches"]):
-            print("DEBUG: Detected history intent")  # Debug line
+            print("DEBUG: Detected history intent")  
             return "get_history"
         elif any(keyword in message_lower for keyword in ["interests", "topics", "my research"]):
-            print("DEBUG: Detected interests intent")  # Debug line
+            print("DEBUG: Detected interests intent")  
             return "get_interests"
         else:
-            print("DEBUG: Defaulting to general chat")  # Debug line
+            print("DEBUG: Defaulting to general chat")  
             return "general_chat"
     
     async def _handle_user_request(self, user_id: str, message: str, action: str) -> Dict[str, Any]:
@@ -387,22 +384,36 @@ class AcademicTutorAgent:
             """Handle general conversation"""
             try:
                 # Use Gemini for general academic assistant conversation
-                system_prompt = """You are an Academic Research Assistant. You help users find and understand academic papers.
+                system_prompt = """You are a Customer Service Agent for an Academic Research Platform. 
 
-    You can help users:
-    - Search for academic papers by topic, author, or year
-    - Summarize research papers to make them more accessible
-    - Track their research interests and search history
-    - Provide academic guidance and explanations
+    Your role is to assist researchers and academics with:
+    - Finding and accessing research papers
+    - Downloading academic documents 
+    - Tracking their research activity
+    - Resolving account and service issues
+    - Providing research assistance
+
+    Always maintain a professional, helpful customer service tone. Use phrases like:
+    - "How can I assist you today?"
+    - "I'd be happy to help you with that"
+    - "Is there anything else I can help you with?"
+    - "Thank you for using our research platform"
+
+    If customers need specific services, guide them to use commands like:
+    - "find papers about [topic]" - to search our academic database
+    - "summarize paper_[id]" - to get paper summaries
+    - "download paper_[id]" - to access full documents
+    - "show my downloads" - to view their account activity
 
     Respond in a helpful, friendly, and academic tone. If the user seems to want to search for papers, suggest they ask you to "find papers about [topic]"."""
 
                 conversation_prompt = f"{system_prompt}\n\nUser: {message}\n\nAssistant:"
                 
                 response = self.model.generate_content(conversation_prompt)
-                
+                satisfaction_check = "\n\n---\n💬 **Was this helpful?** Feel free to ask if you need any other assistance with our research platform!"
+
                 return {
-                    "response": response.text,
+                    "response": response.text + satisfaction_check,
                     "function_calls": ["general_chat"]
                 }
                 

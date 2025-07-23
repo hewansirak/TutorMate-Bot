@@ -171,7 +171,6 @@ class AcademicAPIClient:
         if self.mock_mode:
             return self._mock_paper_search(query, year, limit)
         else:
-            # Real implementation would use arXiv API, Google Scholar API, etc.
             return self._arxiv_search(query, year, limit)
     
     def generate_summary(self, title: str, abstract: str) -> str:

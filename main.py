@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 
 from database import DatabaseManager, init_db
-from tutor_agent import AcademicTutorAgent
+from tutor_agent import AcademicCustomerServiceAgent
 
 app = FastAPI(title="Academic Research Assistant", version="1.0.0")
 
@@ -23,7 +23,7 @@ app.add_middleware(
 # Initialize database and agent
 init_db()
 db_manager = DatabaseManager()
-agent = AcademicTutorAgent(db_manager)
+agent = AcademicCustomerServiceAgent(db_manager)
 
 class ChatRequest(BaseModel):
     user_id: str
