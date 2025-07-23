@@ -67,6 +67,18 @@ class DatabaseManager:
                 )
             """)
             
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS paper_downloads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    paper_id TEXT NOT NULL,
+                    file_path TEXT,
+                    arxiv_id TEXT,
+                    download_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    file_size INTEGER
+                )
+            """)
+            
             conn.commit()
     
     def log_search(self, user_id: str, query: str, search_type: str = "academic"):
@@ -172,7 +184,6 @@ class DatabaseManager:
             results = cursor.fetchall()
             return [{"paper_id": row[0], "title": row[1]} for row in results]
     
-
     def save_paper_summary(self, paper_id: str, summary: str):
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -190,6 +201,72 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?)
             """, (user_id, message, response, json.dumps(function_calls or [])))
             conn.commit()
+    
+    def log_paper_download(self, user_id: str, paper_id: str, file_path: str, arxiv_id: str = None, file_size: int = None):
+        """Log a paper download"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get file size if not provided
+            if file_size is None and os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+            
+            cursor.execute("""
+                INSERT INTO paper_downloads (user_id, paper_id, file_path, arxiv_id, file_size)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, paper_id, file_path, arxiv_id, file_size))
+            conn.commit()
+    
+    def get_user_downloads(self, user_id: str, limit: int = 20) -> List[Dict]:
+        """Get user's download history"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT pd.paper_id, pd.file_path, pd.download_date, pd.file_size, pd.arxiv_id,
+                       cp.title, cp.authors
+                FROM paper_downloads pd
+                LEFT JOIN cached_papers cp ON pd.paper_id = cp.paper_id
+                WHERE pd.user_id = ?
+                ORDER BY pd.download_date DESC
+                LIMIT ?
+            """, (user_id, limit))
+            
+            results = cursor.fetchall()
+            return [
+                {
+                    "paper_id": row[0],
+                    "file_path": row[1],
+                    "download_date": row[2],
+                    "file_size": row[3],
+                    "arxiv_id": row[4],
+                    "title": row[5],
+                    "authors": json.loads(row[6]) if row[6] else []
+                }
+                for row in results
+            ]
+    
+    def check_paper_downloaded(self, user_id: str, paper_id: str) -> Dict:
+        """Check if a paper has been downloaded by the user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT file_path, download_date, file_size
+                FROM paper_downloads 
+                WHERE user_id = ? AND paper_id = ?
+                ORDER BY download_date DESC
+                LIMIT 1
+            """, (user_id, paper_id))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    "downloaded": True,
+                    "file_path": result[0],
+                    "download_date": result[1],
+                    "file_size": result[2],
+                    "exists": os.path.exists(result[0]) if result[0] else False
+                }
+            return {"downloaded": False}
 
 def init_db():
     """Initialize database - call this at startup"""
