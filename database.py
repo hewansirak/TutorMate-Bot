@@ -145,7 +145,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT title, authors, year, abstract, url, summary
+                SELECT paper_id, title, authors, year, abstract, url, summary, search_query
                 FROM cached_papers 
                 WHERE paper_id = ?
             """, (paper_id,))
@@ -153,15 +153,26 @@ class DatabaseManager:
             result = cursor.fetchone()
             if result:
                 return {
-                    "title": result[0],
-                    "authors": json.loads(result[1]),
-                    "year": result[2],
-                    "abstract": result[3],
-                    "url": result[4],
-                    "summary": result[5]
+                    "id": result[0],
+                    "title": result[1],
+                    "authors": json.loads(result[2]) if result[2] else [],
+                    "year": result[3],
+                    "abstract": result[4],
+                    "url": result[5],
+                    "summary": result[6],
+                    "search_query": result[7]
                 }
             return {}
+        
+    def debug_cached_papers(self) -> List[Dict]:
+        """Debug method to see what papers are cached"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT paper_id, title FROM cached_papers ORDER BY cached_date DESC LIMIT 10")
+            results = cursor.fetchall()
+            return [{"paper_id": row[0], "title": row[1]} for row in results]
     
+
     def save_paper_summary(self, paper_id: str, summary: str):
         with self.get_connection() as conn:
             cursor = conn.cursor()
