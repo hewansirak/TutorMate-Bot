@@ -24,7 +24,55 @@ class AcademicAPIClient:
         else:
             # Real implementation would use arXiv API, Google Scholar API, etc.
             return self._arxiv_search(query, year, limit)
+    
+    def generate_summary(self, title: str, abstract: str) -> str:
+        """Generate summary using Gemini API - PUBLIC METHOD"""
+        return self._openai_generate_summary(title, abstract)
 
+    def _openai_generate_summary(self, title: str, abstract: str) -> str:
+        """Generate summary using Gemini API (replacing OpenAI)"""
+        try:
+            import google.generativeai as genai
+            from dotenv import load_dotenv
+            
+            load_dotenv()
+            api_key = os.getenv("GEMINI_API_KEY")
+            
+            if not api_key:
+                print("GEMINI_API_KEY not found - using mock summary")
+                return self._mock_generate_summary(title, abstract)
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            
+            prompt = f"""
+            Please provide a concise but comprehensive summary of this academic paper:
+            
+            Title: {title}
+            Abstract: {abstract}
+            
+            Structure your summary with:
+            **Key Findings:**
+            • [2-3 bullet points of main findings]
+            
+            **Methodology:**
+            [Brief overview of the research approach]
+            
+            **Significance:**
+            [Why this research matters and its potential impact]
+            
+            Keep it accessible but accurate, suitable for someone wanting to quickly understand the paper's contribution.
+            """
+            
+            response = model.generate_content(prompt)
+            return response.text
+            
+        except ImportError:
+            print("google-generativeai not installed - using mock summary")
+            return self._mock_generate_summary(title, abstract)
+        except Exception as e:
+            print(f"Gemini summary error: {e}")
+            return self._mock_generate_summary(title, abstract)
     
     def _mock_paper_search(self, query: str, year: Optional[str] = None, limit: int = 3) -> List[Dict]:
         """Mock paper search for MVP testing"""

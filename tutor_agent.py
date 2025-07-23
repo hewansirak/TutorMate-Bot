@@ -59,10 +59,18 @@ class AcademicTutorAgent:
         """Analyze user message to determine intent"""
         message_lower = message.lower()
         
-        if any(keyword in message_lower for keyword in ["search", "find", "paper", "research"]):
-            return "search_papers"
-        elif any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]):
+        # Check for paper ID pattern first (paper_xxxxxxxx)
+        if re.search(r'paper_[a-f0-9]{8}', message_lower) and any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]):
             return "generate_summary"
+        
+        # Check for other summary keywords
+        elif any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]) and not any(keyword in message_lower for keyword in ["search", "find"]):
+            return "generate_summary"
+        
+        # Check for search intent
+        elif any(keyword in message_lower for keyword in ["search", "find", "paper", "research"]) and not re.search(r'paper_[a-f0-9]{8}', message_lower):
+            return "search_papers"
+        
         elif any(keyword in message_lower for keyword in ["history", "previous", "past searches"]):
             return "get_history"
         elif any(keyword in message_lower for keyword in ["interests", "topics", "my research"]):
@@ -119,6 +127,7 @@ class AcademicTutorAgent:
             # Cache papers and update user interests
             for paper in papers:
                 self.db_manager.cache_paper(paper)
+                print(f"Cached paper: {paper['id']} - {paper['title'][:50]}...")
             
             # Update user search history and interests
             self.db_manager.log_search(user_id, query)
@@ -144,39 +153,54 @@ class AcademicTutorAgent:
             }
             
         except Exception as e:
+            print(f"Error in paper search: {e}")
+            import traceback
+            traceback.print_exc()
             return {"response": f"Error searching for papers: {str(e)}"}
     
     async def _handle_summary_request(self, user_id: str, message: str) -> Dict[str, Any]:
         """Handle paper summary requests"""
         try:
-            # Extract paper ID or find paper from recent searches
+            # Extract paper ID
             paper_id_match = re.search(r'paper_[a-f0-9]{8}', message)
             
-            if paper_id_match:
-                paper_id = paper_id_match.group(0)
-            else:
-                # Try to find paper from recent context or search history
-                return {"response": "Please specify which paper you'd like me to summarize. You can mention the paper ID (like `paper_12345678`) or search for papers first."}
+            if not paper_id_match:
+                return {"response": "Please specify which paper you'd like me to summarize using the paper ID (like `paper_50af359f`) from the search results."}
+            
+            paper_id = paper_id_match.group(0)
+            print(f"Looking for paper ID: {paper_id}")  # Debug
             
             # Get cached paper
             cached_paper = self.db_manager.get_cached_paper(paper_id)
+            print(f"Retrieved paper: {bool(cached_paper)}")  # Debug
             
             if not cached_paper:
-                return {"response": "I couldn't find that paper. Please search for papers first or provide a valid paper ID."}
+                # Debug: Check what's in the database
+                debug_papers = self.db_manager.debug_cached_papers()
+                print(f"Papers in cache: {[p['paper_id'] for p in debug_papers]}")  # Debug
+                return {"response": f"I couldn't find paper {paper_id} in my cache. Please search for papers first and then try summarizing using the paper ID from the results."}
             
             # Check if we have a cached summary
             if cached_paper.get("summary"):
                 summary = cached_paper["summary"]
+                print("Using cached summary")  # Debug
             else:
-                # Generate new summary
+                print(f"Generating new summary for: {cached_paper['title']}")  # Debug
+                
+                # Check if we have title and abstract
+                if not cached_paper.get("title") or not cached_paper.get("abstract"):
+                    return {"response": f"Missing title or abstract for paper {paper_id}. Cannot generate summary."}
+                
                 summary = self.api_client.generate_summary(
                     cached_paper["title"], 
                     cached_paper["abstract"]
                 )
+                
                 # Cache the summary
-                self.db_manager.save_paper_summary(paper_id, summary)
+                if summary:
+                    self.db_manager.save_paper_summary(paper_id, summary)
             
-            response_text = f"Here's a summary of **{cached_paper['title']}**:\n\n{summary}"
+            response_text = f"**Summary of: {cached_paper['title']}**\n\n{summary}"
             
             return {
                 "response": response_text,
@@ -185,6 +209,9 @@ class AcademicTutorAgent:
             }
             
         except Exception as e:
+            print(f"Error in summary request: {e}")  # Debug
+            import traceback
+            traceback.print_exc()  # Debug
             return {"response": f"Error generating summary: {str(e)}"}
     
     async def _handle_history_request(self, user_id: str) -> Dict[str, Any]:
