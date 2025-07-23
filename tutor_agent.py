@@ -1,99 +1,29 @@
 import os
-from langchain.agents import AgentExecutor, create_openai_functions_agent
-from langchain.tools import Tool
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import SystemMessage, HumanMessage
-from typing import List, Dict, Any
 import json
 import re
 from datetime import datetime
-from openai import OpenAI
+from typing import List, Dict, Any
+import google.generativeai as genai
 from api_integrations import AcademicAPIClient
 from database import DatabaseManager
 from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
-
-# OpenAI client pointing to Gemini
-openai_client = OpenAI(
-    api_key=api_key,
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-)
-
 class AcademicTutorAgent:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
         self.api_client = AcademicAPIClient()
-        self.llm = ChatOpenAI(
-            model="gemini-2.0-flash-exp",
-            temperature=0.1,
-            openai_api_key=api_key,
-            openai_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
-            model_kwargs={"top_p": 0.8}
-        )
-        self.agent_executor = self._create_agent()
+        
+        # Configure Gemini
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not found in environment variables")
+            
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
         self.conversation_memory = {}  # Simple in-memory storage for MVP
-    
-    def _create_agent(self):
-        # Define tools for function calling
-        tools = [
-            Tool(
-                name="search_academic",
-                description="Search for academic papers. Input: 'query|year' (year optional)",
-                func=self._search_academic_papers
-            ),
-            Tool(
-                name="generate_summary",
-                description="Generate summary of a specific paper. Input: paper_id",
-                func=self._generate_paper_summary
-            ),
-            Tool(
-                name="get_search_history",
-                description="Get user's previous searches. Input: user_id",
-                func=self._get_user_search_history
-            ),
-            Tool(
-                name="get_user_interests",
-                description="Get user's research interests. Input: user_id",
-                func=self._get_user_interests
-            )
-        ]
-        
-        # Create system prompt
-        system_prompt = """You are an Academic Research Assistant. You help users find and understand academic papers.
-
-Your capabilities:
-1. Search academic papers using search_academic(query|year)
-2. Summarize papers using generate_summary(paper_id)  
-3. Track user interests and search history
-4. Provide context-aware recommendations
-
-When users ask for papers:
-- Use search_academic function
-- Extract relevant topics to update user interests
-- Provide clear, numbered results
-
-When users want summaries:
-- Use generate_summary with the paper ID
-- Provide comprehensive but accessible explanations
-
-When users ask about their history:
-- Use get_search_history or get_user_interests functions
-- Present information in a helpful format
-
-Be conversational, helpful, and academic in tone."""
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", "{input}"),
-            ("assistant", "{agent_scratchpad}")
-        ])
-        
-        agent = create_openai_functions_agent(self.llm, tools, prompt)
-        return AgentExecutor(agent=agent, tools=tools, verbose=True)
     
     async def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
         try:
@@ -103,171 +33,233 @@ Be conversational, helpful, and academic in tone."""
             
             self.conversation_memory[user_id].append({"role": "user", "message": message})
             
-            # Process with agent
-            response = await self._run_agent(user_id, message)
+            # Analyze the message to determine what action to take
+            action = self._analyze_user_intent(message)
+            
+            response_data = await self._handle_user_request(user_id, message, action)
             
             # Store response
-            self.conversation_memory[user_id].append({"role": "assistant", "message": response["response"]})
+            self.conversation_memory[user_id].append({"role": "assistant", "message": response_data["response"]})
             
             # Log to database
             self.db_manager.log_chat_session(
                 user_id, 
                 message, 
-                response["response"], 
-                response.get("function_calls", [])
+                response_data["response"], 
+                response_data.get("function_calls", [])
             )
             
-            return response
+            return response_data
             
         except Exception as e:
+            print(f"Error in process_message: {str(e)}")
             return {"response": f"I encountered an error: {str(e)}", "error": True}
     
-    async def _run_agent(self, user_id: str, message: str) -> Dict[str, Any]:
-        # Add user context to message
-        enhanced_message = f"User ID: {user_id}\nMessage: {message}"
+    def _analyze_user_intent(self, message: str) -> str:
+        """Analyze user message to determine intent"""
+        message_lower = message.lower()
         
-        # Run the agent
-        result = self.agent_executor.invoke({"input": enhanced_message})
-        
-        # Parse any special outputs (papers, summaries)
-        response_data = {
-            "response": result["output"],
-            "function_calls": []  # Track what functions were called
-        }
-        
-        # Extract structured data if present
-        if "PAPERS_FOUND:" in result["output"]:
-            response_data["papers"] = self._extract_papers_from_response(result["output"])
-        
-        if "SUMMARY_GENERATED:" in result["output"]:
-            response_data["summary"] = self._extract_summary_from_response(result["output"])
-        
-        return response_data
+        if any(keyword in message_lower for keyword in ["search", "find", "paper", "research"]):
+            return "search_papers"
+        elif any(keyword in message_lower for keyword in ["summarize", "summary", "explain"]):
+            return "generate_summary"
+        elif any(keyword in message_lower for keyword in ["history", "previous", "past searches"]):
+            return "get_history"
+        elif any(keyword in message_lower for keyword in ["interests", "topics", "my research"]):
+            return "get_interests"
+        else:
+            return "general_chat"
     
-    def _search_academic_papers(self, query_input: str) -> str:
-        """Search for academic papers"""
+    async def _handle_user_request(self, user_id: str, message: str, action: str) -> Dict[str, Any]:
+        """Handle different types of user requests"""
+        
+        if action == "search_papers":
+            return await self._handle_paper_search(user_id, message)
+        elif action == "generate_summary":
+            return await self._handle_summary_request(user_id, message)
+        elif action == "get_history":
+            return await self._handle_history_request(user_id)
+        elif action == "get_interests":
+            return await self._handle_interests_request(user_id)
+        else:
+            return await self._handle_general_chat(user_id, message)
+    
+    async def _handle_paper_search(self, user_id: str, message: str) -> Dict[str, Any]:
+        """Handle paper search requests"""
         try:
-            # Parse input
-            parts = query_input.split("|")
-            query = parts[0].strip()
-            year = parts[1].strip() if len(parts) > 1 else None
+            # Extract search query and year from message using Gemini
+            extraction_prompt = f"""
+            Extract the search query and year (if mentioned) from this user message: "{message}"
             
-            # Search papers
-            papers = self.api_client.search_papers(query, year=year)
+            Respond in this exact format:
+            QUERY: [extracted search terms]
+            YEAR: [year if mentioned, otherwise "none"]
+            
+            Examples:
+            - "Find papers about machine learning from 2023" -> QUERY: machine learning, YEAR: 2023
+            - "Search for deep learning papers" -> QUERY: deep learning, YEAR: none
+            """
+            
+            extraction_response = self.model.generate_content(extraction_prompt)
+            extracted_text = extraction_response.text
+            
+            # Parse the extraction
+            query_match = re.search(r'QUERY:\s*(.+)', extracted_text)
+            year_match = re.search(r'YEAR:\s*(.+)', extracted_text)
+            
+            query = query_match.group(1).strip() if query_match else message
+            year = year_match.group(1).strip() if year_match and year_match.group(1).strip().lower() != "none" else None
+            
+            # Search for papers
+            papers = self.api_client.search_papers(query, year=year, limit=3)
             
             if not papers:
-                return "No papers found for this query."
+                return {"response": "I couldn't find any papers matching your search criteria. Try different keywords or check the spelling."}
             
-            # Cache papers and extract topics for interest tracking
-            topics = self._extract_topics_from_query(query)
-            user_id = self._extract_user_id_from_context()
-            
+            # Cache papers and update user interests
             for paper in papers:
                 self.db_manager.cache_paper(paper)
             
-            # Update user interests and search history
-            if user_id:
-                self.db_manager.log_search(user_id, query)
-                for topic in topics:
-                    self.db_manager.update_user_interest(user_id, topic)
+            # Update user search history and interests
+            self.db_manager.log_search(user_id, query)
+            topics = self._extract_topics_from_query(query)
+            for topic in topics:
+                self.db_manager.update_user_interest(user_id, topic)
             
             # Format response
-            result = "PAPERS_FOUND:\n"
-            for i, paper in enumerate(papers, 1):
-                result += f"{i}. **{paper['title']}** ({paper['year']})\n"
-                result += f"   Authors: {', '.join(paper['authors'][:3])}\n"
-                result += f"   URL: {paper['url']}\n"
-                result += f"   Paper ID: {paper['id']}\n\n"
+            response_text = f"I found {len(papers)} papers related to '{query}':\n\n"
             
-            return result
+            for i, paper in enumerate(papers, 1):
+                response_text += f"**{i}. {paper['title']}** ({paper['year']})\n"
+                response_text += f"Authors: {', '.join(paper['authors'][:3])}\n"
+                response_text += f"Paper ID: `{paper['id']}`\n"
+                response_text += f"URL: {paper['url']}\n\n"
+            
+            response_text += "You can ask me to summarize any of these papers by mentioning the paper ID or title!"
+            
+            return {
+                "response": response_text,
+                "papers": papers,
+                "function_calls": ["search_papers"]
+            }
             
         except Exception as e:
-            return f"Error searching papers: {str(e)}"
+            return {"response": f"Error searching for papers: {str(e)}"}
     
-    def _generate_paper_summary(self, paper_id: str) -> str:
-        """Generate summary for a specific paper"""
+    async def _handle_summary_request(self, user_id: str, message: str) -> Dict[str, Any]:
+        """Handle paper summary requests"""
         try:
-            # Check if we have cached summary
-            cached_paper = self.db_manager.get_cached_paper(paper_id)
-            if cached_paper and cached_paper.get("summary"):
-                return f"SUMMARY_GENERATED:\n{cached_paper['summary']}"
+            # Extract paper ID or find paper from recent searches
+            paper_id_match = re.search(r'paper_[a-f0-9]{8}', message)
             
-            # Generate new summary
-            if cached_paper and cached_paper.get("abstract"):
+            if paper_id_match:
+                paper_id = paper_id_match.group(0)
+            else:
+                # Try to find paper from recent context or search history
+                return {"response": "Please specify which paper you'd like me to summarize. You can mention the paper ID (like `paper_12345678`) or search for papers first."}
+            
+            # Get cached paper
+            cached_paper = self.db_manager.get_cached_paper(paper_id)
+            
+            if not cached_paper:
+                return {"response": "I couldn't find that paper. Please search for papers first or provide a valid paper ID."}
+            
+            # Check if we have a cached summary
+            if cached_paper.get("summary"):
+                summary = cached_paper["summary"]
+            else:
+                # Generate new summary
                 summary = self.api_client.generate_summary(
                     cached_paper["title"], 
                     cached_paper["abstract"]
                 )
-                
                 # Cache the summary
                 self.db_manager.save_paper_summary(paper_id, summary)
-                
-                return f"SUMMARY_GENERATED:\n{summary}"
-            else:
-                return "Paper not found in cache. Please search for papers first."
-                
+            
+            response_text = f"Here's a summary of **{cached_paper['title']}**:\n\n{summary}"
+            
+            return {
+                "response": response_text,
+                "summary": summary,
+                "function_calls": ["generate_summary"]
+            }
+            
         except Exception as e:
-            return f"Error generating summary: {str(e)}"
+            return {"response": f"Error generating summary: {str(e)}"}
     
-    def _get_user_search_history(self, user_id: str) -> str:
-        """Get user's search history"""
+    async def _handle_history_request(self, user_id: str) -> Dict[str, Any]:
+        """Handle search history requests"""
         try:
             history = self.db_manager.get_user_search_history(user_id, limit=10)
             
             if not history:
-                return "No search history found."
+                return {"response": "You haven't made any searches yet. Try asking me to find some papers!"}
             
-            result = "Your recent searches:\n"
-            for item in history:
-                result += f"• {item['query']} ({item['timestamp'][:10]})\n"
+            response_text = "Here are your recent searches:\n\n"
+            for i, item in enumerate(history, 1):
+                response_text += f"{i}. **{item['query']}** ({item['timestamp'][:10]})\n"
             
-            return result
+            return {
+                "response": response_text,
+                "function_calls": ["get_search_history"]
+            }
             
         except Exception as e:
-            return f"Error retrieving search history: {str(e)}"
+            return {"response": f"Error retrieving search history: {str(e)}"}
     
-    def _get_user_interests(self, user_id: str) -> str:
-        """Get user's interests"""
+    async def _handle_interests_request(self, user_id: str) -> Dict[str, Any]:
+        """Handle user interests requests"""
         try:
             interests = self.db_manager.get_user_interests(user_id)
             
             if not interests:
-                return "No research interests tracked yet."
+                return {"response": "I haven't identified your research interests yet. Search for some papers and I'll start tracking your interests!"}
             
-            result = "Your research interests:\n"
-            for item in interests:
-                result += f"• {item['topic'].title()} (searched {item['score']} times)\n"
+            response_text = "Based on your searches, your research interests include:\n\n"
+            for i, item in enumerate(interests, 1):
+                response_text += f"{i}. **{item['topic'].title()}** (searched {item['score']} times)\n"
             
-            return result
+            return {
+                "response": response_text,
+                "function_calls": ["get_user_interests"]
+            }
             
         except Exception as e:
-            return f"Error retrieving interests: {str(e)}"
+            return {"response": f"Error retrieving interests: {str(e)}"}
+    
+    async def _handle_general_chat(self, user_id: str, message: str) -> Dict[str, Any]:
+        """Handle general conversation"""
+        try:
+            # Use Gemini for general academic assistant conversation
+            system_prompt = """You are an Academic Research Assistant. You help users find and understand academic papers.
+
+You can help users:
+- Search for academic papers by topic, author, or year
+- Summarize research papers to make them more accessible
+- Track their research interests and search history
+- Provide academic guidance and explanations
+
+Respond in a helpful, friendly, and academic tone. If the user seems to want to search for papers, suggest they ask you to "find papers about [topic]"."""
+
+            conversation_prompt = f"{system_prompt}\n\nUser: {message}\n\nAssistant:"
+            
+            response = self.model.generate_content(conversation_prompt)
+            
+            return {
+                "response": response.text,
+                "function_calls": ["general_chat"]
+            }
+            
+        except Exception as e:
+            return {"response": f"Error in general chat: {str(e)}"}
     
     def _extract_topics_from_query(self, query: str) -> List[str]:
         """Extract topics from search query for interest tracking"""
-        # Simple keyword extraction - can be enhanced with NLP
         topics = []
         keywords = query.lower().split()
         
         # Filter out common words
-        stopwords = {"in", "on", "for", "about", "and", "or", "the", "a", "an", "with"}
+        stopwords = {"in", "on", "for", "about", "and", "or", "the", "a", "an", "with", "find", "search", "papers"}
         topics = [word for word in keywords if word not in stopwords and len(word) > 2]
         
         return topics[:3]  # Limit to top 3 topics
-    
-    def _extract_user_id_from_context(self) -> str:
-        """Extract user ID from conversation context - simplified for MVP"""
-        # In a real implementation, this would be passed through the context
-        return "default_user"  # Placeholder for MVP
-    
-    def _extract_papers_from_response(self, response: str) -> List[Dict]:
-        """Extract papers data from agent response"""
-        # This would parse the structured paper data
-        # Simplified for MVP
-        return []
-    
-    def _extract_summary_from_response(self, response: str) -> str:
-        """Extract summary from agent response"""
-        if "SUMMARY_GENERATED:" in response:
-            return response.split("SUMMARY_GENERATED:")[1].strip()
-        return ""

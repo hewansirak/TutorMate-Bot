@@ -127,9 +127,9 @@ def main():
             display_message(assistant_response, is_user=False)
             
             # Handle special responses (papers, summaries)
-            if "papers" in response:
+            if "papers" in response and isinstance(response["papers"], list):
                 for paper in response["papers"]:
-                    paper_text = f"📄 **{paper['title']}**\nAuthors: {paper['authors']}\nYear: {paper['year']}"
+                    paper_text = f"📄 **{paper['title']}**\nAuthors: {', '.join(paper['authors'])}\nYear: {paper['year']}" # Added join for authors
                     st.session_state.messages.append({"role": "assistant", "content": paper_text})
                     display_message(paper_text, is_user=False)
             
