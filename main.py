@@ -58,6 +58,22 @@ async def get_user_interests(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/debug/cached-papers")
+async def debug_cached_papers():
+    try:
+        papers = db_manager.debug_cached_papers()
+        return {"cached_papers": papers}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/debug/paper/{paper_id}")
+async def debug_get_paper(paper_id: str):
+    try:
+        paper = db_manager.get_cached_paper(paper_id)
+        return {"paper": paper, "found": bool(paper)}
+    except Exception as e:
+        return {"error": str(e)}
+    
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now()}
