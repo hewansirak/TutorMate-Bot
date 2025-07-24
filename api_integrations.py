@@ -42,15 +42,10 @@ class AcademicAPIClient:
                 url = result[0]
                 print(f"Found URL: {url}")
                 
-                # Extract arXiv ID from different URL formats:
-                # https://arxiv.org/abs/1234.5678v1
-                # https://arxiv.org/abs/1234.5678
-                # http://export.arxiv.org/abs/1234.5678
-                
                 # Pattern to match arXiv URLs and extract the ID
                 arxiv_patterns = [
-                    r'arxiv\.org/abs/([^/?]+)',  # Matches most arXiv URLs
-                    r'export\.arxiv\.org/abs/([^/?]+)',  # Alternative arXiv domain
+                    r'arxiv\.org/abs/([^/?]+)', 
+                    r'export\.arxiv\.org/abs/([^/?]+)',  
                 ]
                 
                 for pattern in arxiv_patterns:
@@ -67,7 +62,6 @@ class AcademicAPIClient:
             print(f"Error extracting arXiv ID for {paper_id}: {e}")
             return None
     
-    # Updated download_paper method that uses the database lookup
     def download_paper(self, paper_id: str, download_dir: str = "downloads") -> Dict[str, Any]:
         """Download paper PDF from arXiv using database lookup"""
         try:
@@ -84,10 +78,8 @@ class AcademicAPIClient:
                     "paper_id": paper_id
                 }
             
-            # Construct arXiv PDF URL
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
             
-            # Generate safe filename
             safe_filename = f"{arxiv_id.replace('/', '_').replace(':', '_')}.pdf"
             file_path = os.path.join(download_dir, safe_filename)
             
@@ -105,7 +97,6 @@ class AcademicAPIClient:
                     "already_existed": True
                 }
             
-            # Download the PDF
             print(f"Downloading paper from: {pdf_url}")
             response = requests.get(pdf_url, stream=True, timeout=60)
             response.raise_for_status()
@@ -119,14 +110,12 @@ class AcademicAPIClient:
                     "paper_id": paper_id
                 }
             
-            # Save the file
             with open(file_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
             file_size = os.path.getsize(file_path)
             
-            # Verify we downloaded a valid PDF (basic check)
             if file_size < 1024:  # Less than 1KB is suspicious
                 os.remove(file_path)  # Clean up
                 return {
@@ -209,19 +198,15 @@ class AcademicAPIClient:
             **Significance:**
             [Why this research matters and its potential impact]
             
-            Keep it accessible but accurate, suitable for someone wanting to quickly understand the paper's contribution.
+            Keep it accessible but accurate, suitable for someone wanting 
+            to quickly understand the paper's contribution.
             """
             
             response = model.generate_content(prompt)
             return response.text
             
-        except ImportError:
-            print("google-generativeai not installed - using mock summary")
-            return self._mock_generate_summary(title, abstract)
         except Exception as e:
             print(f"Gemini summary error: {e}")
-            return self._mock_generate_summary(title, abstract)
-    
     
     def _arxiv_search(self, query: str, year: Optional[str] = None, limit: int = 3) -> List[Dict]:
         """Real arXiv API search"""
@@ -297,14 +282,10 @@ class AcademicAPIClient:
             
         except requests.exceptions.Timeout:
             print("ArXiv API timeout - falling back to mock data")
-            return self._mock_paper_search(query, year, limit)
         except requests.exceptions.RequestException as e:
             print(f"ArXiv API request error: {e}")
-            return self._mock_paper_search(query, year, limit)
         except ET.ParseError as e:
             print(f"ArXiv XML parsing error: {e}")
-            return self._mock_paper_search(query, year, limit)
         except Exception as e:
             print(f"ArXiv search error: {e}")
-            return self._mock_paper_search(query, year, limit)
         
