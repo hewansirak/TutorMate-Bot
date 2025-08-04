@@ -4,7 +4,6 @@ import json
 from typing import Any, List, Dict, Optional
 import hashlib
 from datetime import datetime
-import openai
 import xml.etree.ElementTree as ET
 import re
 import os
@@ -18,7 +17,6 @@ load_dotenv()
 class AcademicAPIClient:
     def __init__(self, db_path: str = "academic_assistant.db"):
         self.mock_mode = False
-        self.openai_client = openai.OpenAI() if not self.mock_mode else None
         self.db_path = db_path
         
     def _get_connection(self):
@@ -164,10 +162,10 @@ class AcademicAPIClient:
     
     def generate_summary(self, title: str, abstract: str) -> str:
         """Generate summary using Gemini API - PUBLIC METHOD"""
-        return self._openai_generate_summary(title, abstract)
+        return self._gemini_generate_summary(title, abstract)
 
-    def _openai_generate_summary(self, title: str, abstract: str) -> str:
-        """Generate summary using Gemini API (replacing OpenAI)"""
+    def _gemini_generate_summary(self, title: str, abstract: str) -> str:
+        """Generate summary using Gemini API"""
         try:
             import google.generativeai as genai
             from dotenv import load_dotenv

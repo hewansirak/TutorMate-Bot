@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from dataclasses import dataclass
 from typing import List, Optional
 import uvicorn
 from datetime import datetime
@@ -25,20 +25,27 @@ init_db()
 db_manager = DatabaseManager()
 agent = AcademicCustomerServiceAgent(db_manager)
 
-class ChatRequest(BaseModel):
+@dataclass
+class ChatRequest:
     user_id: str
     message: str
 
-class ChatResponse(BaseModel):
+@dataclass
+class ChatResponse:
     response: str
     papers: Optional[List[dict]] = None
     summary: Optional[str] = None
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+@app.post("/chat")
+async def chat_endpoint(request: dict):
     try:
-        response_data = await agent.process_message(request.user_id, request.message)
-        return ChatResponse(**response_data)
+        user_id = request.get("user_id")
+        message = request.get("message")
+        if not user_id or not message:
+            raise HTTPException(status_code=400, detail="user_id and message are required")
+        
+        response_data = await agent.process_message(user_id, message)
+        return response_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
